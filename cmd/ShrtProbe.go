@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -90,7 +91,7 @@ func GenerateRandomURL(baseURL, charset string, pathlenth int) (string, error) {
 	return sb.String(), nil
 }
 
-func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) ([]string, error) {
+func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (string, error) {
 	defaultcharset := "abcdefghijklmnopqrstuvwxyz0123456789"
 	var sb strings.Builder
 	var urls []string
@@ -107,5 +108,35 @@ func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) ([
 			urls = append(urls, sb.String())
 		}
 	}
-	return urls, nil
+
+	tmpFile, err := os.CreateTemp("", "enumerate.txt")
+	if err != nil {
+		return "", fmt.Errorf("Failed to create temporary file: %v", err)
+	}
+
+	for _, u := range urls {
+		_, err := tmpFile.WriteString(u + "\n")
+		if err != nil {
+			err := tmpFile.Close()
+			if err != nil {
+				return "", fmt.Errorf("Failed to close temporary file: %v", err)
+			}
+			err = os.Remove(tmpFile.Name())
+			if err != nil {
+				return "", fmt.Errorf("Failed to remove temporary file: %v", err)
+			}
+			return "", fmt.Errorf("Failed to write to temporary file: %v", err)
+		}
+	}
+
+	err = tmpFile.Close()
+	if err != nil {
+		err := os.Remove(tmpFile.Name())
+		if err != nil {
+			return "", fmt.Errorf("Failed to remove temporary file: %v", err)
+		}
+		return "", fmt.Errorf("Failed to close temporary file: %v", err)
+	}
+
+	return tmpFile.Name(), nil
 }
