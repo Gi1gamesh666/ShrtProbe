@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"net/http"
 	"os"
+	"time"
 )
 
 var (
@@ -19,11 +20,26 @@ var (
 	concurrency  int
 	addColor     = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
 	removeColor  = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
+	errorColor   = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
+	config       = RequestConfig{
+		Method:       "GET",
+		URL:          "",
+		Timeout:      10 * time.Second,
+		RequestCount: 100,
+		Concurrency:  10,
+	}
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "ShrtProbe",
 	Short: "A robustness and security testing tool for URL shortening services.",
+
+	Run: func(cmd *cobra.Command, args []string) {
+
+		startTime := time.Now()
+		duration := time.Since(startTime)
+		fmt.Printf("请求完成，总耗时: %v\n", duration)
+	},
 }
 
 func Execute() {
@@ -43,9 +59,8 @@ var versionCmd = &cobra.Command{
 }
 
 var proxycmd = &cobra.Command{
-	Use:     "proxy",
-	Short:   "设置代理",
-	Aliases: []string{"p"},
+	Use:   "proxy",
+	Short: "设置代理",
 	Run: func(cmd *cobra.Command, args []string) {
 		proxy, err := Proxy(proxyAddr)
 		if err != nil {
@@ -58,19 +73,10 @@ var proxycmd = &cobra.Command{
 }
 
 var requestCountCmd = &cobra.Command{
-	Use:     "requestCount",
-	Short:   "设置请求数",
-	Aliases: []string{"c"},
+	Use:   "requestCount",
+	Short: "设置请求数",
 	Run: func(cmd *cobra.Command, args []string) {
 		addColor("已设置请求数: %d\n", requestCount)
-	},
-}
-
-var modeCmd = &cobra.Command{
-	Use:   "mode",
-	Short: "设置模式",
-	Run: func(cmd *cobra.Command, args []string) {
-		addColor("已设置模式: %s\n", args[0])
 	},
 }
 
@@ -82,9 +88,24 @@ var concurrencyCmd = &cobra.Command{
 	},
 }
 
+var modeCmd = &cobra.Command{
+	Use:   "mode",
+	Short: "设置模式",
+	Run: func(cmd *cobra.Command, args []string) {
+		if mode == "enumerate" {
+			addColor("已设置模式为枚举模式\n")
+		} else if mode == "random" {
+			addColor("已设置模式为随机模式\n")
+		} else {
+			removeColor("模式设置异常: %s\n", mode)
+		}
+	},
+}
+
 func init() {
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "请求的目标URL（必需）")
 	proxycmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "设置代理服务器地址（格式：http://host:port）")
 	requestCountCmd.Flags().Int64VarP(&requestCount, "count", "c", 100, "设置总请求数（默认100）")
 	modeCmd.Flags().StringVarP(&mode, "mode", "m", "enumerate", "设置模式（enumerate/random）")

@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	"golang.org/x/net/context"
 	"golang.org/x/net/proxy"
 	"math/rand"
 	"net"
@@ -12,8 +13,20 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
+
+type RequestConfig struct {
+	httpClient   http.Client
+	URL          string            // 请求URL（必需）
+	Method       string            // 请求方法（GET/POST等，默认GET）
+	Headers      map[string]string // 请求头（可选）
+	Body         string            // 请求体（可选，如JSON/表单数据）
+	Concurrency  int               // 最大并发数（默认5）
+	RequestCount int64             // 总请求数（默认100）
+	Timeout      time.Duration     // 请求超时时间（默认30秒）
+}
 
 func Proxy(proxyURL string) (*http.Client, error) {
 	var transport http.Transport
@@ -142,4 +155,53 @@ func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (s
 	}
 
 	return tmpFile.Name(), nil
+}
+
+func sendSingleRequest(config RequestConfig, requestID int64) (*http.Response, error) {
+
+	client := httpClient
+
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		config.Method,
+		config.URL,
+		strings.NewReader(config.Body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("请求创建失败: %v", err)
+	}
+
+	for key, value := range config.Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求发送失败: %v", err)
+	}
+
+	return resp, nil
+}
+
+func sendRequestsConcurrently(config RequestConfig) {
+	var wg sync.WaitGroup
+	taskChan := make(chan bool, config.Concurrency)
+
+	for i := int64(0); i < config.RequestCount; i++ {
+		wg.Add(1)
+		taskChan <- true
+
+		go func(requestID int64) {
+			defer wg.Done()
+			defer func() { <-taskChan }()
+
+			resp, err := sendSingleRequest(config, requestID)
+			if err != nil {
+				fmt.Printf("请求%d失败: %v\n", requestID, err)
+				return
+			}
+			fmt.Printf("请求%d成功，状态码: %d\n", requestID, resp.StatusCode)
+		}(i)
+	}
+	wg.Wait()
 }
