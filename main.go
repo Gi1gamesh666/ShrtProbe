@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Gi1gamesh666 <208263442@qq.com>
 */
 package ShrtProbe
 

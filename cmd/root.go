@@ -1,30 +1,31 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Gi1gamesh666 <208263442@qq.com>
 */
 package cmd
 
 import (
+	"fmt"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"net/http"
 	"os"
 )
 
-// rootCmd represents the base command when called without any subcommands
+var (
+	httpClient   http.Client = http.Client{}
+	proxyAddr    string
+	requestCount int64
+	mode         string
+	concurrency  int
+	addColor     = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
+	removeColor  = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "ShrtProbe",
 	Short: "A robustness and security testing tool for URL shortening services.",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
@@ -32,14 +33,66 @@ func Execute() {
 	}
 }
 
+var versionCmd = &cobra.Command{
+	Use:     "version",
+	Short:   "查看应用版本",
+	Aliases: []string{"v"},
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("Version: 1.0.0")
+	},
+}
+
+var proxycmd = &cobra.Command{
+	Use:     "proxy",
+	Short:   "设置代理",
+	Aliases: []string{"p"},
+	Run: func(cmd *cobra.Command, args []string) {
+		proxy, err := Proxy(proxyAddr)
+		if err != nil {
+			removeColor("代理设置异常: %w", err)
+		} else {
+			httpClient = *proxy
+			addColor("代理已设置成功: %s\n", proxyAddr)
+		}
+	},
+}
+
+var requestCountCmd = &cobra.Command{
+	Use:     "requestCount",
+	Short:   "设置请求数",
+	Aliases: []string{"c"},
+	Run: func(cmd *cobra.Command, args []string) {
+		addColor("已设置请求数: %d\n", requestCount)
+	},
+}
+
+var modeCmd = &cobra.Command{
+	Use:   "mode",
+	Short: "设置模式",
+	Run: func(cmd *cobra.Command, args []string) {
+		addColor("已设置模式: %s\n", args[0])
+	},
+}
+
+var concurrencyCmd = &cobra.Command{
+	Use:   "concurrency",
+	Short: "设置并发数",
+	Run: func(cmd *cobra.Command, args []string) {
+		addColor("已设置并发数: %d\n", concurrency)
+	},
+}
+
 func init() {
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.ShrtProbe.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	proxycmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "设置代理服务器地址（格式：http://host:port）")
+	requestCountCmd.Flags().Int64VarP(&requestCount, "count", "c", 100, "设置总请求数（默认100）")
+	modeCmd.Flags().StringVarP(&mode, "mode", "m", "enumerate", "设置模式（enumerate/random）")
+	concurrencyCmd.Flags().IntVarP(&concurrency, "concurrency", "n", 10, "设置并发数（默认10）")
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(proxycmd)
+	rootCmd.AddCommand(requestCountCmd)
+	rootCmd.AddCommand(modeCmd)
+	rootCmd.AddCommand(concurrencyCmd)
+
 }
