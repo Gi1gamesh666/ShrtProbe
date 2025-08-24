@@ -16,6 +16,7 @@ var (
 	httpClient   http.Client = http.Client{}
 	proxyAddr    string
 	requestCount int64
+	charset      string
 	mode         string
 	concurrency  int
 	addColor     = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
@@ -35,6 +36,26 @@ var rootCmd = &cobra.Command{
 	Short: "A robustness and security testing tool for URL shortening services.",
 
 	Run: func(cmd *cobra.Command, args []string) {
+
+		if config.URL == "" {
+			errorColor("请设置目标URL")
+			os.Exit(1)
+		}
+
+		if charset == "" {
+			addColor("请设置字符集: (默认字符集为: abcdefghijklmnopqrstuvwxyz0123456789)")
+
+		} else {
+			addColor("已设置字符集: %s\n", charset)
+		}
+
+		if mode == "enumerate" {
+			config.URL, _ = GenerateEnumerateURL(config.URL, charset, 5, int(requestCount))
+		} else if mode == "random" {
+			config.URL, _ = GenerateRandomURL(config.URL, charset, 5)
+		} else {
+			errorColor("模式设置异常: %s\n", mode)
+		}
 
 		startTime := time.Now()
 		duration := time.Since(startTime)
@@ -88,32 +109,16 @@ var concurrencyCmd = &cobra.Command{
 	},
 }
 
-var modeCmd = &cobra.Command{
-	Use:   "mode",
-	Short: "设置模式",
-	Run: func(cmd *cobra.Command, args []string) {
-		if mode == "enumerate" {
-			addColor("已设置模式为枚举模式\n")
-		} else if mode == "random" {
-			addColor("已设置模式为随机模式\n")
-		} else {
-			removeColor("模式设置异常: %s\n", mode)
-		}
-	},
-}
-
 func init() {
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "请求的目标URL（必需）")
 	proxycmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "设置代理服务器地址（格式：http://host:port）")
 	requestCountCmd.Flags().Int64VarP(&requestCount, "count", "c", 100, "设置总请求数（默认100）")
-	modeCmd.Flags().StringVarP(&mode, "mode", "m", "enumerate", "设置模式（enumerate/random）")
 	concurrencyCmd.Flags().IntVarP(&concurrency, "concurrency", "n", 10, "设置并发数（默认10）")
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(proxycmd)
 	rootCmd.AddCommand(requestCountCmd)
-	rootCmd.AddCommand(modeCmd)
 	rootCmd.AddCommand(concurrencyCmd)
 
 }
