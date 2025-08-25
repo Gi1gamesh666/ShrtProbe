@@ -143,7 +143,7 @@ func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (s
 	return tmpFile.Name(), nil
 }
 
-func sendSingleRequest(config RequestConfig, requestID int64) (*http.Response, error) {
+func sendSingleRequest(config RequestConfig) (*http.Response, error) {
 
 	client := httpClient
 
@@ -171,23 +171,28 @@ func sendSingleRequest(config RequestConfig, requestID int64) (*http.Response, e
 
 func sendRequestsConcurrently(config RequestConfig) {
 	var wg sync.WaitGroup
-	taskChan := make(chan bool, config.Concurrency)
+	taskChan := make(chan string, config.Concurrency)
 
 	for i := int64(0); i < config.RequestCount; i++ {
 		wg.Add(1)
-		taskChan <- true
+		taskChan <- config.URL
+	}
 
-		go func(requestID int64) {
+	go func() {
+		wg.Wait()
+		close(taskChan)
+	}()
+
+	for url := range taskChan {
+		go func(u string) {
 			defer wg.Done()
-			defer func() { <-taskChan }()
 
-			resp, err := sendSingleRequest(config, requestID)
+			resp, err := sendSingleRequest(config) // 假设sendSingleRequest支持传入URL
 			if err != nil {
-				fmt.Printf("请求%d失败: %v\n", requestID, err)
+				fmt.Printf("请求[%s]失败: %v\n", config.URL, err) // 直接打印URL
 				return
 			}
-			fmt.Printf("请求%d成功，状态码: %d\n", requestID, resp.StatusCode)
-		}(i)
+			fmt.Printf("请求[%s]成功，状态码: %d\n", config.URL, resp.StatusCode) // 直接打印URL
+		}(url)
 	}
-	wg.Wait()
 }
