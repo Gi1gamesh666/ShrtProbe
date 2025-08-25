@@ -13,17 +13,17 @@ import (
 )
 
 var (
-	httpClient   http.Client = http.Client{}
-	proxyAddr    string
-	requestCount int64
-	charset      string
-	mode         string
-	concurrency  int
-	addColor     = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
-	removeColor  = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
-	errorColor   = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
-	config       = RequestConfig{
-		Method:       "GET",
+	httpClient     http.Client = http.Client{}
+	proxyAddr      string
+	requestCount   int64
+	defaultcharset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	charset        string
+	mode           string
+	concurrency    int
+	addColor       = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
+	removeColor    = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
+	errorColor     = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
+	config         = RequestConfig{
 		URL:          "",
 		Timeout:      10 * time.Second,
 		RequestCount: 100,
@@ -36,25 +36,24 @@ var rootCmd = &cobra.Command{
 	Short: "A robustness and security testing tool for URL shortening services.",
 
 	Run: func(cmd *cobra.Command, args []string) {
-
 		if config.URL == "" {
 			errorColor("请设置目标URL")
 			os.Exit(1)
 		}
-
 		if charset == "" {
-			addColor("请设置字符集: (默认字符集为: abcdefghijklmnopqrstuvwxyz0123456789)")
-
+			addColor("使用默认字符集: abcdefghijklmnopqrstuvwxyz0123456789")
 		} else {
+			charset = removeDuplicates(charset + defaultcharset)
 			addColor("已设置字符集: %s\n", charset)
 		}
+		if mode != "enumerate" || mode != "random" {
+			removeColor("错误: 未知mode")
+		}
 
-		if mode == "enumerate" {
-			config.URL, _ = GenerateEnumerateURL(config.URL, charset, 5, int(requestCount))
-		} else if mode == "random" {
+		if mode == "random" {
 			config.URL, _ = GenerateRandomURL(config.URL, charset, 5)
-		} else {
-			errorColor("模式设置异常: %s\n", mode)
+			addColor("已生成随机URL: %s\n", config.URL)
+			sendRequestsConcurrently(config)
 		}
 
 		startTime := time.Now()
@@ -113,6 +112,7 @@ func init() {
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "请求的目标URL（必需）")
+	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "设置字符集（默认abcdefghijklmnopqrstuvwxyz0123456789）")
 	proxycmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "设置代理服务器地址（格式：http://host:port）")
 	requestCountCmd.Flags().Int64VarP(&requestCount, "count", "c", 100, "设置总请求数（默认100）")
 	concurrencyCmd.Flags().IntVarP(&concurrency, "concurrency", "n", 10, "设置并发数（默认10）")

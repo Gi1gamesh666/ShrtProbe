@@ -20,9 +20,7 @@ import (
 type RequestConfig struct {
 	httpClient   http.Client
 	URL          string            // 请求URL（必需）
-	Method       string            // 请求方法（GET/POST等，默认GET）
 	Headers      map[string]string // 请求头（可选）
-	Body         string            // 请求体（可选，如JSON/表单数据）
 	Concurrency  int               // 最大并发数（默认5）
 	RequestCount int64             // 总请求数（默认100）
 	Timeout      time.Duration     // 请求超时时间（默认30秒）
@@ -57,7 +55,7 @@ func Proxy(proxyURL string) (*http.Client, error) {
 		case "socks5":
 			dialer, err := proxy.FromURL(parsedURL, proxy.Direct)
 			if err != nil {
-				return nil, fmt.Errorf("Failed to create SOCKS5 proxy: %v", err)
+				return nil, fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
 			}
 			contextDialer, ok := dialer.(proxy.ContextDialer)
 			if !ok {
@@ -90,14 +88,8 @@ func removeDuplicates(s string) string {
 }
 
 func GenerateRandomURL(baseURL, charset string, pathlenth int) (string, error) {
-	defaultcharset := "abcdefghijklmnopqrstuvwxyz0123456789"
 	var sb strings.Builder
 	sb.WriteString(baseURL)
-	if charset == "" {
-		charset = defaultcharset
-	} else {
-		charset = removeDuplicates(defaultcharset + charset)
-	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for i := 0; i < pathlenth; i++ {
@@ -108,15 +100,9 @@ func GenerateRandomURL(baseURL, charset string, pathlenth int) (string, error) {
 }
 
 func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (string, error) {
-	defaultcharset := "abcdefghijklmnopqrstuvwxyz0123456789"
 	var sb strings.Builder
 	var urls []string
 	sb.WriteString(baseURL)
-	if charset == "" {
-		charset = defaultcharset
-	} else {
-		charset = removeDuplicates(defaultcharset + charset)
-	}
 
 	for i := 0; i < counts; i++ {
 		for i := 0; i < pathlenth; i++ {
@@ -163,9 +149,9 @@ func sendSingleRequest(config RequestConfig, requestID int64) (*http.Response, e
 
 	req, err := http.NewRequestWithContext(
 		context.Background(),
-		config.Method,
+		"GET",
 		config.URL,
-		strings.NewReader(config.Body),
+		nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("请求创建失败: %v", err)
