@@ -5,11 +5,12 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -48,11 +49,18 @@ var rootCmd = &cobra.Command{
 		}
 		if mode != "enumerate" || mode != "random" {
 			removeColor("错误: 未知mode")
+			os.Exit(1)
 		}
 
 		if mode == "random" {
 			config.URL, _ = GenerateRandomURL(config.URL, charset, 5)
 			addColor("已生成随机URL: %s\n", config.URL)
+			sendRequestsConcurrently(config)
+		}
+
+		if mode == "enumerate" {
+			config.URL, _ = GenerateEnumerateURL(config.URL, charset, 5, 10)
+			addColor("已生成枚举URL: %s\n", config.URL)
 			sendRequestsConcurrently(config)
 		}
 

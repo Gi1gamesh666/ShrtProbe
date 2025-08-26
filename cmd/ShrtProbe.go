@@ -5,8 +5,6 @@ package cmd
 
 import (
 	"fmt"
-	"golang.org/x/net/context"
-	"golang.org/x/net/proxy"
 	"math/rand"
 	"net"
 	"net/http"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context"
+	"golang.org/x/net/proxy"
 )
 
 type RequestConfig struct {
@@ -24,6 +25,14 @@ type RequestConfig struct {
 	Concurrency  int               // 最大并发数（默认5）
 	RequestCount int64             // 总请求数（默认100）
 	Timeout      time.Duration     // 请求超时时间（默认30秒）
+}
+
+type URLGenerator struct {
+	baseURL    string
+	charset    string
+	pathLength int
+	totalCount int
+	current    int
 }
 
 func Proxy(proxyURL string) (*http.Client, error) {
@@ -103,6 +112,10 @@ func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (s
 	var sb strings.Builder
 	var urls []string
 	sb.WriteString(baseURL)
+
+	if pathlenth > len(charset) {
+		return "", fmt.Errorf("Path length cannot be greater than the length of the charset")
+	}
 
 	for i := 0; i < counts; i++ {
 		for i := 0; i < pathlenth; i++ {
@@ -195,4 +208,86 @@ func sendRequestsConcurrently(config RequestConfig) {
 			fmt.Printf("请求[%s]成功，状态码: %d\n", config.URL, resp.StatusCode) // 直接打印URL
 		}(url)
 	}
+}
+
+// NewURLGenerator 创建新的URL生成器
+func NewURLGenerator(baseURL, charset string, pathLength int) *URLGenerator {
+	totalCount := 1
+	for i := 0; i < pathLength; i++ {
+		totalCount *= len(charset)
+	}
+
+	return &URLGenerator{
+		baseURL:    baseURL,
+		charset:    charset,
+		pathLength: pathLength,
+		totalCount: totalCount,
+		current:    0,
+	}
+}
+
+// HasNext 是否还有下一个URL
+func (g *URLGenerator) HasNext() bool {
+	return g.current < g.totalCount
+}
+
+// Next 生成下一个URL
+func (g *URLGenerator) Next() string {
+	if !g.HasNext() {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(g.baseURL)
+
+	// 将当前数字转换为以charset长度为基数的表示
+	num := g.current
+	for i := 0; i < g.pathLength; i++ {
+		sb.WriteByte(g.charset[num%len(g.charset)])
+		num /= len(g.charset)
+	}
+
+	g.current++
+	return sb.String()
+}
+
+// TotalCount 获取总数
+func (g *URLGenerator) TotalCount() int {
+	return g.totalCount
+}
+
+func sendRequestsConcurrentlyWithGenerator(config RequestConfig, generator *URLGenerator) {
+	var wg sync.WaitGroup
+	urlChan := make(chan string, config.Concurrency)
+
+	// 启动工作协程
+	for i := 0; i < config.Concurrency; i++ {
+		go func() {
+			for url := range urlChan {
+				// 创建临时配置，修改URL
+				tempConfig := config
+				tempConfig.URL = url
+
+				resp, err := sendSingleRequest(tempConfig)
+				if err != nil {
+					fmt.Printf("请求[%s]失败: %v\n", url, err)
+					continue
+				}
+				fmt.Printf("请求[%s]成功，状态码: %d\n", url, resp.StatusCode)
+				resp.Body.Close()
+			}
+			wg.Done()
+		}()
+	}
+
+	// 发送任务
+	wg.Add(1)
+	go func() {
+		defer close(urlChan)
+		for generator.HasNext() {
+			urlChan <- generator.Next()
+		}
+	}()
+
+	wg.Wait()
 }
