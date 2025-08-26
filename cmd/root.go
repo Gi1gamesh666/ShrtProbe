@@ -17,9 +17,10 @@ var (
 	httpClient     http.Client = http.Client{}
 	proxyAddr      string
 	requestCount   int64
-	defaultcharset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	defaultCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	charset        string
 	mode           string
+	pathLength     int
 	concurrency    int
 	addColor       = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
 	removeColor    = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
@@ -30,43 +31,89 @@ var (
 		RequestCount: 100,
 		Concurrency:  10,
 	}
+	generator *URLGenerator
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "ShrtProbe",
 	Short: "A robustness and security testing tool for URL shortening services.",
+	Long: `ShrtProbe is a tool designed for testing the robustness and security of URL shortening services.
+
+Key features:
+  - Generate random or enumerated short URL paths
+  - Send concurrent HTTP requests to test service
+  - Support HTTP/HTTPS/SOCKS5 proxies
+  - Customizable charset, path length, concurrency and other parameters
+
+Usage examples:
+  # Test target URL with default settings
+  ShrtProbe --url http://example.com/
+
+  # Use custom charset and path length
+  ShrtProbe --url http://example.com/ --charset abc123 --length 6
+
+  # Set concurrency and request count
+  ShrtProbe --url http://example.com/ --concurrency 20 --count 1000
+
+  # Use proxy server
+  ShrtProbe proxy --proxy http://proxy.example.com:8080
+  ShrtProbe --url http://example.com/`,
 
 	Run: func(cmd *cobra.Command, args []string) {
+		// Check URL
 		if config.URL == "" {
-			errorColor("请设置目标URL")
+			errorColor("Error: Target URL is required\n")
 			os.Exit(1)
 		}
+
+		// Check charset
 		if charset == "" {
-			addColor("使用默认字符集: abcdefghijklmnopqrstuvwxyz0123456789")
+			addColor("Using default charset: %s\n", defaultCharset)
+			charset = defaultCharset
 		} else {
-			charset = removeDuplicates(charset + defaultcharset)
-			addColor("已设置字符集: %s\n", charset)
+			charset = removeDuplicates(charset)
+			addColor("Charset set: %s\n", charset)
 		}
-		if mode != "enumerate" || mode != "random" {
-			removeColor("错误: 未知mode")
+
+		proxy, err := Proxy(proxyAddr)
+		if err != nil {
+			removeColor("Proxy setup error: %v\n", err)
+		} else {
+			httpClient = *proxy
+			addColor("Proxy set successfully: %s\n", proxyAddr)
+		}
+
+		// Check mode
+		if mode != "enumerate" && mode != "random" {
+			removeColor("Error: Unknown mode. Use 'enumerate' or 'random'\n")
+			os.Exit(1)
+		}
+
+		// Check path length
+		if pathLength <= 0 {
+			removeColor("Error: Path length must be greater than 0\n")
 			os.Exit(1)
 		}
 
 		if mode == "random" {
-			config.URL, _ = GenerateRandomURL(config.URL, charset, 5)
-			addColor("已生成随机URL: %s\n", config.URL)
+			var err error
+			config.URL, err = GenerateRandomURL(config.URL, charset, pathLength)
+			if err != nil {
+				errorColor("Failed to generate random URL: %v\n", err)
+				os.Exit(1)
+			}
+			addColor("Generated random URL: %s\n", config.URL)
 			sendRequestsConcurrently(config)
 		}
 
 		if mode == "enumerate" {
-			config.URL, _ = GenerateEnumerateURL(config.URL, charset, 5, 10)
-			addColor("已生成枚举URL: %s\n", config.URL)
-			sendRequestsConcurrently(config)
+			generator = NewURLGenerator(config.URL, charset, pathLength)
+			sendRequestsConcurrentlyWithGenerator(config, generator)
 		}
 
 		startTime := time.Now()
 		duration := time.Since(startTime)
-		fmt.Printf("请求完成，总耗时: %v\n", duration)
+		fmt.Printf("Requests completed, total time: %v\n", duration)
 	},
 }
 
@@ -79,7 +126,7 @@ func Execute() {
 
 var versionCmd = &cobra.Command{
 	Use:     "version",
-	Short:   "查看应用版本",
+	Short:   "Show application version",
 	Aliases: []string{"v"},
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("Version: 1.0.0")
@@ -88,45 +135,65 @@ var versionCmd = &cobra.Command{
 
 var proxycmd = &cobra.Command{
 	Use:   "proxy",
-	Short: "设置代理",
+	Short: "Set proxy server",
+	Long: `Set proxy server for sending HTTP requests. Supports HTTP, HTTPS and SOCKS5 proxies.
+
+Examples:
+  # Set HTTP proxy
+  ShrtProbe proxy --proxy http://proxy.example.com:8080
+  
+  # Set SOCKS5 proxy
+  ShrtProbe proxy --proxy socks5://localhost:1080`,
 	Run: func(cmd *cobra.Command, args []string) {
-		proxy, err := Proxy(proxyAddr)
-		if err != nil {
-			removeColor("代理设置异常: %w", err)
-		} else {
-			httpClient = *proxy
-			addColor("代理已设置成功: %s\n", proxyAddr)
+
+	},
+}
+
+var completionCmd = &cobra.Command{
+	Use:    "completion [bash|zsh|fish|powershell]",
+	Short:  "Generate completion script",
+	Hidden: true,
+	Long: `To load completions:
+
+Bash:
+  $ source <(ShrtProbe completion bash)
+
+Zsh:
+  $ ShrtProbe completion zsh > "${fpath[1]}/_ShrtProbe"
+
+Fish:
+  $ ShrtProbe completion fish | source
+
+PowerShell:
+  PS> ShrtProbe completion powershell | Out-String | Invoke-Expression
+`,
+	DisableFlagsInUseLine: true,
+	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
+	Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+	Run: func(cmd *cobra.Command, args []string) {
+		switch args[0] {
+		case "bash":
+			cmd.Root().GenBashCompletion(os.Stdout)
+		case "zsh":
+			cmd.Root().GenZshCompletion(os.Stdout)
+		case "fish":
+			cmd.Root().GenFishCompletion(os.Stdout, true)
+		case "powershell":
+			cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
 		}
 	},
 }
 
-var requestCountCmd = &cobra.Command{
-	Use:   "requestCount",
-	Short: "设置请求数",
-	Run: func(cmd *cobra.Command, args []string) {
-		addColor("已设置请求数: %d\n", requestCount)
-	},
-}
-
-var concurrencyCmd = &cobra.Command{
-	Use:   "concurrency",
-	Short: "设置并发数",
-	Run: func(cmd *cobra.Command, args []string) {
-		addColor("已设置并发数: %d\n", concurrency)
-	},
-}
-
 func init() {
-
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "请求的目标URL（必需）")
-	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "设置字符集（默认abcdefghijklmnopqrstuvwxyz0123456789）")
-	proxycmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "设置代理服务器地址（格式：http://host:port）")
-	requestCountCmd.Flags().Int64VarP(&requestCount, "count", "c", 100, "设置总请求数（默认100）")
-	concurrencyCmd.Flags().IntVarP(&concurrency, "concurrency", "n", 10, "设置并发数（默认10）")
+	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "Target URL (required)")
+	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "Character set (default: abcdefghijklmnopqrstuvwxyz0123456789)")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", "random", "Mode: random or enumerate")
+	rootCmd.Flags().IntVarP(&pathLength, "length", "l", 5, "Path length (default: 5)")
+	rootCmd.Flags().Int64VarP(&config.RequestCount, "count", "c", 100, "Total request count (default: 100)")
+	rootCmd.Flags().IntVarP(&config.Concurrency, "concurrency", "n", 10, "Concurrency level (default: 10)")
+	rootCmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "Proxy server address (format: http://host:port)")
+	rootCmd.MarkFlagRequired("url")
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(proxycmd)
-	rootCmd.AddCommand(requestCountCmd)
-	rootCmd.AddCommand(concurrencyCmd)
-
+	rootCmd.AddCommand(completionCmd)
 }
