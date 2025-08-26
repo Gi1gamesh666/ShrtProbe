@@ -133,22 +133,6 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-var proxycmd = &cobra.Command{
-	Use:   "proxy",
-	Short: "Set proxy server",
-	Long: `Set proxy server for sending HTTP requests. Supports HTTP, HTTPS and SOCKS5 proxies.
-
-Examples:
-  # Set HTTP proxy
-  ShrtProbe proxy --proxy http://proxy.example.com:8080
-  
-  # Set SOCKS5 proxy
-  ShrtProbe proxy --proxy socks5://localhost:1080`,
-	Run: func(cmd *cobra.Command, args []string) {
-
-	},
-}
-
 var completionCmd = &cobra.Command{
 	Use:    "completion [bash|zsh|fish|powershell]",
 	Short:  "Generate completion script",
@@ -194,6 +178,5 @@ func init() {
 	rootCmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "Proxy server address (format: http://host:port)")
 	rootCmd.MarkFlagRequired("url")
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(proxycmd)
 	rootCmd.AddCommand(completionCmd)
 }
