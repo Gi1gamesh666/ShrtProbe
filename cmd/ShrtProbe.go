@@ -9,9 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/context"
@@ -34,6 +34,11 @@ type URLGenerator struct {
 	totalCount int
 	current    int
 }
+
+var (
+	successCount int64
+	failureCount int64
+)
 
 func Proxy(proxyURL string) (*http.Client, error) {
 	var transport http.Transport
@@ -96,64 +101,22 @@ func removeDuplicates(s string) string {
 	return string(result)
 }
 
-func GenerateRandomURL(baseURL, charset string, pathlenth int) (string, error) {
+func GenerateRandomURL(baseURL, charset string, pathLength int) (string, error) {
 	var sb strings.Builder
-	sb.WriteString(baseURL)
+
+	// 确保baseURL以/结尾
+	normalizedBaseURL := baseURL
+	if normalizedBaseURL[len(normalizedBaseURL)-1] != '/' {
+		normalizedBaseURL += "/"
+	}
+	sb.WriteString(normalizedBaseURL)
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < pathlenth; i++ {
+	for i := 0; i < pathLength; i++ {
 		sb.WriteByte(charset[r.Intn(len(charset))])
 	}
 
 	return sb.String(), nil
-}
-
-func GenerateEnumerateURL(baseURL, charset string, pathlenth int, counts int) (string, error) {
-	var sb strings.Builder
-	var urls []string
-	sb.WriteString(baseURL)
-
-	if pathlenth > len(charset) {
-		return "", fmt.Errorf("Path length cannot be greater than the length of the charset")
-	}
-
-	for i := 0; i < counts; i++ {
-		for i := 0; i < pathlenth; i++ {
-			sb.WriteByte(charset[i%len(charset)])
-			urls = append(urls, sb.String())
-		}
-	}
-
-	tmpFile, err := os.CreateTemp("", "enumerate.txt")
-	if err != nil {
-		return "", fmt.Errorf("Failed to create temporary file: %v", err)
-	}
-
-	for _, u := range urls {
-		_, err := tmpFile.WriteString(u + "\n")
-		if err != nil {
-			err := tmpFile.Close()
-			if err != nil {
-				return "", fmt.Errorf("Failed to close temporary file: %v", err)
-			}
-			err = os.Remove(tmpFile.Name())
-			if err != nil {
-				return "", fmt.Errorf("Failed to remove temporary file: %v", err)
-			}
-			return "", fmt.Errorf("Failed to write to temporary file: %v", err)
-		}
-	}
-
-	err = tmpFile.Close()
-	if err != nil {
-		err := os.Remove(tmpFile.Name())
-		if err != nil {
-			return "", fmt.Errorf("Failed to remove temporary file: %v", err)
-		}
-		return "", fmt.Errorf("Failed to close temporary file: %v", err)
-	}
-
-	return tmpFile.Name(), nil
 }
 
 func sendSingleRequest(config RequestConfig) (*http.Response, error) {
@@ -184,30 +147,74 @@ func sendSingleRequest(config RequestConfig) (*http.Response, error) {
 
 func sendRequestsConcurrently(config RequestConfig) {
 	var wg sync.WaitGroup
-	taskChan := make(chan string, config.Concurrency)
+	taskChan := make(chan struct{}, config.Concurrency) // 改为发送空结构体信号
 
-	for i := int64(0); i < config.RequestCount; i++ {
+	// 重置计数器
+	atomic.StoreInt64(&successCount, 0)
+	atomic.StoreInt64(&failureCount, 0)
+
+	// 启动消费者 goroutines
+	for i := 0; i < config.Concurrency; i++ {
 		wg.Add(1)
-		taskChan <- config.URL
+		go func() {
+			defer wg.Done()
+			for range taskChan {
+				// 每次都生成新的随机URL
+				randomURL, err := GenerateRandomURL(config.URL, charset, pathLength)
+				if err != nil {
+					atomic.AddInt64(&failureCount, 1)
+					fmt.Printf("[-]URL生成失败: %v\n", err)
+					continue
+				}
+
+				// 创建临时配置，使用新生成的URL
+				tempConfig := config
+				tempConfig.URL = randomURL
+
+				resp, err := sendSingleRequest(tempConfig)
+				if err != nil {
+					atomic.AddInt64(&failureCount, 1)
+					fmt.Printf("[-]请求[%s]失败: %v\n", randomURL, err)
+					continue
+				}
+
+				// 只有3xx状态码才算成功
+				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+					atomic.AddInt64(&successCount, 1)
+					location := resp.Header.Get("Location")
+					if location != "" {
+						fmt.Printf("[+]请求[%s]成功，状态码: %d，重定向到: %s\n", randomURL, resp.StatusCode, location)
+					} else {
+						fmt.Printf("[+]请求[%s]成功，状态码: %d\n", randomURL, resp.StatusCode)
+					}
+				} else {
+					atomic.AddInt64(&failureCount, 1)
+					fmt.Printf("[-]请求[%s]失败，状态码: %d\n", randomURL, resp.StatusCode)
+				}
+
+				if resp.Body != nil {
+					resp.Body.Close()
+				}
+			}
+		}()
 	}
 
+	// 生产者：发送任务信号到通道
 	go func() {
-		wg.Wait()
-		close(taskChan)
+		defer close(taskChan)
+		for i := int64(0); i < config.RequestCount; i++ {
+			taskChan <- struct{}{} // 发送空结构体作为信号
+		}
 	}()
 
-	for url := range taskChan {
-		go func(u string) {
-			defer wg.Done()
+	// 等待所有任务完成
+	wg.Wait()
 
-			resp, err := sendSingleRequest(config) // 假设sendSingleRequest支持传入URL
-			if err != nil {
-				fmt.Printf("请求[%s]失败: %v\n", config.URL, err) // 直接打印URL
-				return
-			}
-			fmt.Printf("请求[%s]成功，状态码: %d\n", config.URL, resp.StatusCode) // 直接打印URL
-		}(url)
-	}
+	// 输出统计结果
+	fmt.Printf("\n统计结果:\n")
+	fmt.Printf("成功请求: %d\n", atomic.LoadInt64(&successCount))
+	fmt.Printf("失败请求: %d\n", atomic.LoadInt64(&failureCount))
+	fmt.Printf("总请求数: %d\n", config.RequestCount)
 }
 
 // NewURLGenerator 创建新的URL生成器

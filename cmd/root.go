@@ -16,20 +16,31 @@ import (
 var (
 	httpClient     http.Client = http.Client{}
 	proxyAddr      string
-	requestCount   int64
 	defaultCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	charset        string
 	mode           string
 	pathLength     int
-	concurrency    int
 	addColor       = color.New(color.FgGreen).Add(color.Bold).PrintfFunc()
 	removeColor    = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
 	errorColor     = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
 	config         = RequestConfig{
+		httpClient:   httpClient,
 		URL:          "",
 		Timeout:      10 * time.Second,
 		RequestCount: 100,
-		Concurrency:  10,
+		Concurrency:  5,
+		Headers: map[string]string{
+			"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+			"Accept-Language":           "en-US,en;q=0.5",
+			"Accept-Encoding":           "gzip, deflate",
+			"Connection":                "keep-alive",
+			"Upgrade-Insecure-Requests": "1",
+			"Sec-Fetch-Dest":            "document",
+			"Sec-Fetch-Mode":            "navigate",
+			"Sec-Fetch-Site":            "none",
+			"Cache-Control":             "max-age=0",
+		},
 	}
 	generator *URLGenerator
 )
@@ -75,12 +86,14 @@ Usage examples:
 			addColor("Charset set: %s\n", charset)
 		}
 
-		proxy, err := Proxy(proxyAddr)
-		if err != nil {
-			removeColor("Proxy setup error: %v\n", err)
-		} else {
-			httpClient = *proxy
-			addColor("Proxy set successfully: %s\n", proxyAddr)
+		if proxyAddr != "" {
+			proxy, err := Proxy(proxyAddr)
+			if err != nil {
+				removeColor("Proxy setup error: %v\n", err)
+			} else {
+				httpClient = *proxy
+				addColor("Proxy set successfully: %s\n", proxyAddr)
+			}
 		}
 
 		// Check mode
@@ -95,25 +108,38 @@ Usage examples:
 			os.Exit(1)
 		}
 
+		fmt.Println("")
+		addColor("Target URL:     %s\n", config.URL)
+		addColor("Mode:           %s\n", mode)
+		addColor("Charset:        %s\n", charset)
+		addColor("Path Length:    %d\n", pathLength)
+		addColor("Request Count:  %d\n", config.RequestCount)
+		addColor("Concurrency:    %d\n", config.Concurrency)
+
 		if mode == "random" {
+			if config.URL[len(config.URL)-1] != '/' {
+				config.URL += "/"
+			}
 			var err error
-			config.URL, err = GenerateRandomURL(config.URL, charset, pathLength)
 			if err != nil {
 				errorColor("Failed to generate random URL: %v\n", err)
 				os.Exit(1)
 			}
-			addColor("Generated random URL: %s\n", config.URL)
+
+			startTime := time.Now()
 			sendRequestsConcurrently(config)
+			duration := time.Since(startTime)
+			fmt.Printf("Requests completed, total time: %v\n", duration)
 		}
 
 		if mode == "enumerate" {
 			generator = NewURLGenerator(config.URL, charset, pathLength)
+			startTime := time.Now()
 			sendRequestsConcurrentlyWithGenerator(config, generator)
+			duration := time.Since(startTime)
+			fmt.Printf("Requests completed, total time: %v\n", duration)
 		}
 
-		startTime := time.Now()
-		duration := time.Since(startTime)
-		fmt.Printf("Requests completed, total time: %v\n", duration)
 	},
 }
 
@@ -173,8 +199,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "Character set (default: abcdefghijklmnopqrstuvwxyz0123456789)")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "random", "Mode: random or enumerate")
 	rootCmd.Flags().IntVarP(&pathLength, "length", "l", 5, "Path length (default: 5)")
-	rootCmd.Flags().Int64VarP(&config.RequestCount, "count", "c", 100, "Total request count (default: 100)")
-	rootCmd.Flags().IntVarP(&config.Concurrency, "concurrency", "n", 10, "Concurrency level (default: 10)")
+	rootCmd.Flags().Int64VarP(&config.RequestCount, "count", "c", 10, "Total request count (default: 100)")
+	rootCmd.Flags().IntVarP(&config.Concurrency, "concurrency", "n", 15, "Concurrency level (default: 10)")
 	rootCmd.Flags().StringVarP(&proxyAddr, "proxy", "p", "", "Proxy server address (format: http://host:port)")
 	rootCmd.MarkFlagRequired("url")
 	rootCmd.AddCommand(versionCmd)
