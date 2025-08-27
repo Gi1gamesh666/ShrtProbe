@@ -1,4 +1,5 @@
 # ShrtProbe
+[English](README-en.md) | [中文](README-zh.md)
 
 ShrtProbe 是一个用于测试 URL 短链接服务健壮性和安全性的工具。它能够生成随机或枚举的短链接路径，并通过并发 HTTP 请求对目标服务进行探测。
 
