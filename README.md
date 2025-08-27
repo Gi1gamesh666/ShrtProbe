@@ -9,7 +9,7 @@ ShrtProbe is a tool designed for testing the robustness and security of URL shor
 - Support HTTP/HTTPS/SOCKS5 proxies
 - Customizable charset, path length, concurrency and other parameters
 - Concurrent request testing for service performance
-- Browser-like request伪装 to avoid detection
+- Browser-like request to avoid detection
 - Custom request headers support
 
 ## Installation
