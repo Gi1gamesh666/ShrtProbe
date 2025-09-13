@@ -5,17 +5,18 @@ package cmd
 
 import (
 	"fmt"
+	"golang.org/x/net/context"
+	"golang.org/x/net/proxy"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/context"
-	"golang.org/x/net/proxy"
 )
 
 type RequestConfig struct {
@@ -104,7 +105,6 @@ func removeDuplicates(s string) string {
 func GenerateRandomURL(baseURL, charset string, pathLength int) (string, error) {
 	var sb strings.Builder
 
-	// 确保baseURL以/结尾
 	normalizedBaseURL := baseURL
 	if normalizedBaseURL[len(normalizedBaseURL)-1] != '/' {
 		normalizedBaseURL += "/"
@@ -147,77 +147,99 @@ func sendSingleRequest(config RequestConfig) (*http.Response, error) {
 
 func sendRequestsConcurrently(config RequestConfig) {
 	var wg sync.WaitGroup
-	taskChan := make(chan struct{}, config.Concurrency) // 改为发送空结构体信号
+	taskChan := make(chan struct{}, config.Concurrency)
 
-	// 重置计数器
 	atomic.StoreInt64(&successCount, 0)
 	atomic.StoreInt64(&failureCount, 0)
 
-	// 启动消费者 goroutines
+	sigChan := make(chan struct{})
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	go func() {
+		<-signals
+		close(sigChan)
+	}()
+
 	for i := 0; i < config.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for range taskChan {
-				// 每次都生成新的随机URL
-				randomURL, err := GenerateRandomURL(config.URL, charset, pathLength)
-				if err != nil {
-					atomic.AddInt64(&failureCount, 1)
-					fmt.Printf("[-]URL生成失败: %v\n", err)
-					continue
-				}
-
-				// 创建临时配置，使用新生成的URL
-				tempConfig := config
-				tempConfig.URL = randomURL
-
-				resp, err := sendSingleRequest(tempConfig)
-				if err != nil {
-					atomic.AddInt64(&failureCount, 1)
-					fmt.Printf("[-]请求[%s]失败: %v\n", randomURL, err)
-					continue
-				}
-
-				// 只有3xx状态码才算成功
-				if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-					atomic.AddInt64(&successCount, 1)
-					location := resp.Header.Get("Location")
-					if location != "" {
-						fmt.Printf("[+]请求[%s]成功，状态码: %d，重定向到: %s\n", randomURL, resp.StatusCode, location)
-					} else {
-						fmt.Printf("[+]请求[%s]成功，状态码: %d\n", randomURL, resp.StatusCode)
+			for {
+				select {
+				case <-sigChan:
+					return
+				case _, ok := <-taskChan:
+					if !ok {
+						return
 					}
-				} else {
-					atomic.AddInt64(&failureCount, 1)
-					fmt.Printf("[-]请求[%s]失败，状态码: %d\n", randomURL, resp.StatusCode)
-				}
+					randomURL, err := GenerateRandomURL(config.URL, charset, pathLength)
+					if err != nil {
+						atomic.AddInt64(&failureCount, 1)
+						fmt.Printf("[-]URL生成失败: %v\n", err)
+						continue
+					}
 
-				if resp.Body != nil {
-					resp.Body.Close()
+					tempConfig := config
+					tempConfig.URL = randomURL
+
+					resp, err := sendSingleRequest(tempConfig)
+					if err != nil {
+						atomic.AddInt64(&failureCount, 1)
+						fmt.Printf("[-]请求[%s]失败: %v\n", randomURL, err)
+						continue
+					}
+
+					if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+						atomic.AddInt64(&successCount, 1)
+						location := resp.Header.Get("Location")
+						if location != "" {
+							fmt.Printf("[+]请求[%s]成功，状态码: %d，重定向到: %s\n", randomURL, resp.StatusCode, location)
+						} else {
+							fmt.Printf("[+]请求[%s]成功，状态码: %d\n", randomURL, resp.StatusCode)
+						}
+					} else {
+						atomic.AddInt64(&failureCount, 1)
+						fmt.Printf("[-]请求[%s]失败，状态码: %d\n", randomURL, resp.StatusCode)
+					}
+
+					if resp.Body != nil {
+						resp.Body.Close()
+					}
 				}
 			}
 		}()
 	}
 
-	// 生产者：发送任务信号到通道
 	go func() {
 		defer close(taskChan)
 		for i := int64(0); i < config.RequestCount; i++ {
-			taskChan <- struct{}{} // 发送空结构体作为信号
+			select {
+			case <-sigChan:
+				return
+			case taskChan <- struct{}{}:
+			}
 		}
 	}()
 
-	// 等待所有任务完成
-	wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 
-	// 输出统计结果
+	select {
+	case <-done:
+	case <-sigChan:
+		wg.Wait()
+	}
+
 	fmt.Printf("\n统计结果:\n")
 	fmt.Printf("成功请求: %d\n", atomic.LoadInt64(&successCount))
 	fmt.Printf("失败请求: %d\n", atomic.LoadInt64(&failureCount))
 	fmt.Printf("总请求数: %d\n", config.RequestCount)
 }
 
-// NewURLGenerator 创建新的URL生成器
 func NewURLGenerator(baseURL, charset string, pathLength int) *URLGenerator {
 	totalCount := 1
 	for i := 0; i < pathLength; i++ {

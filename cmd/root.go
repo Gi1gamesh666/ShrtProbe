@@ -16,7 +16,7 @@ import (
 var (
 	httpClient     http.Client = http.Client{}
 	proxyAddr      string
-	defaultCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	defaultCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	charset        string
 	mode           string
 	pathLength     int
@@ -196,7 +196,7 @@ PowerShell:
 
 func init() {
 	rootCmd.Flags().StringVarP(&config.URL, "url", "u", "", "Target URL (required)")
-	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "Character set (default: abcdefghijklmnopqrstuvwxyz0123456789)")
+	rootCmd.Flags().StringVarP(&charset, "charset", "s", "", "Character set (default: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789)")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", "random", "Mode: random or enumerate")
 	rootCmd.Flags().IntVarP(&pathLength, "length", "l", 5, "Path length (default: 5)")
 	rootCmd.Flags().Int64VarP(&config.RequestCount, "count", "c", 10, "Total request count (default: 100)")
