@@ -1,122 +1,136 @@
 # ShrtProbe
-[English](README-en.md) | [中文](README-zh.md)
 
-ShrtProbe is a tool designed for testing the robustness and security of URL shortening services. It can generate random or enumerated short URL paths and probe target services through concurrent HTTP requests.
+English | [中文](README-zh.md)
+
+ShrtProbe probes URL shortening services by generating random or enumerated short paths and issuing concurrent HTTP requests. Core logic lives in [`internal/probe`](internal/probe); the CLI is a thin [`cmd`](cmd) layer.
 
 ## Features
 
-- Generate random or enumerated short URL paths
-- Support HTTP/HTTPS/SOCKS5 proxies
-- Customizable charset, path length, concurrency and other parameters
-- Concurrent request testing for service performance
-- Browser-like request to avoid detection
-- Custom request headers support
+- **Modes**: `random` (random paths) and `enumerate` (exhaustive path sequence in charset order)
+- **Proxies**: HTTP, HTTPS, `socks5`, `socks5h`
+- **Concurrency**: worker pool with connection reuse and configurable per-request timeout
+- **Success criteria** (see below): default **HTTP 3xx**, or **custom failure rules** (body substring / status code) where success means *not* matching any failure rule
+- **Graceful stop**: `Ctrl+C` cancels in-flight work via `context`
+- Default browser-like headers (built-in; not configurable via flags today)
 
 ## Installation
 
 ### Build from source
 
+Requires [Go](https://go.dev/dl/) 1.21+ (see `go.mod`).
+
 ```bash
-git clone https://github.com/yourusername/ShrtProbe.git
+git clone https://github.com/Gi1gamesh666/ShrtProbe.git
 cd ShrtProbe
-go build -o ShrtProbe
+go build -o ShrtProbe .
 ```
 
+### Prebuilt binaries
 
-### Direct download
-
-Download pre-compiled binaries from the [Releases](https://github.com/yourusername/ShrtProbe/releases) page.
+Download from [Releases](https://github.com/Gi1gamesh666/ShrtProbe/releases) if available.
 
 ## Usage
 
-### Basic usage
+### Basic
 
 ```bash
-# Test target URL with default settings
 ./ShrtProbe --url http://example.com/
 
-# Use custom charset and path length
 ./ShrtProbe --url http://example.com/ --charset abc123 --length 6
 
-# Set concurrency and request count
 ./ShrtProbe --url http://example.com/ --concurrency 20 --count 1000
 
-# Use proxy server
 ./ShrtProbe --url http://example.com/ --proxy http://proxy.example.com:8080
 ```
 
+### Modes
 
-### Mode explanation
-
-ShrtProbe supports two probing modes:
-
-1. **random mode**: Randomly generates paths of specified length for probing
-2. **enumerate mode**: Sequentially enumerates all possible path combinations for probing
+| Mode | Behavior |
+|------|----------|
+| `random` (default) | Sends `--count` probes; each uses a random path of length `--length` |
+| `enumerate` | Walks every path combination in order; total = `len(charset) ^ length` |
 
 ```bash
-# Use random mode (default)
 ./ShrtProbe --url http://example.com/ --mode random
-
-# Use enumerate mode
 ./ShrtProbe --url http://example.com/ --mode enumerate
 ```
 
+### Success criteria
 
-### Custom request headers
+**Default (no failure rules)**  
+A probe is **successful** when the HTTP response status is **3xx** (typical short-link redirect).
+
+**With `--fail-body` / `--fail-status`**  
+You define what counts as **failure**. A probe is **successful** when the request completes without error and **does not** match any failure rule:
+
+- **`--fail-body`** (repeatable): failure if the response body (first 512 KiB, case-insensitive) contains the substring.
+- **`--fail-status`** (repeatable): failure if the status code equals the given value.
+
+Status rules are checked first, then body rules. If only `--fail-status` is set, the body is not read.
 
 ```bash
-# Add custom request headers
-./ShrtProbe --url http://example.com/ --header "Referer: https://example.com/" --header "Cookie: sessionid=abc123"
+./ShrtProbe --url http://example.com/ \
+  --fail-body "not found" --fail-body "页面不存在" \
+  --fail-status 404 --fail-status 410
 ```
 
+### Other commands
 
-## Command Line Arguments
+```bash
+./ShrtProbe version
+./ShrtProbe completion bash   # zsh | fish | powershell
+```
 
-| Parameter | Short | Default | Description |
-|-----------|-------|---------|-------------|
-| `--url` | `-u` | None (required) | Target URL |
-| `--charset` | `-s` | `abcdefghijklmnopqrstuvwxyz0123456789` | Character set |
-| `--mode` | `-m` | `random` | Mode: `random` or `enumerate` |
-| `--length` | `-l` | `5` | Path length |
-| `--count` | `-c` | `100` | Total request count |
-| `--concurrency` | `-n` | `10` | Concurrency level |
-| `--proxy` | `-p` | None | Proxy server address |
-| `--header` | `-H` | None | Custom request headers |
+## Command-line flags
 
-## Output Example
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--url` | `-u` | *(required)* | Base URL of the short-link service |
+| `--charset` | `-s` | `a-zA-Z0-9` | Character set for path segments |
+| `--mode` | `-m` | `random` | `random` or `enumerate` |
+| `--length` | `-l` | `5` | Path length (number of characters) |
+| `--count` | `-c` | `10` | Number of requests (**random** mode only) |
+| `--concurrency` | `-n` | `15` | Concurrent workers |
+| `--timeout` | `-t` | `10s` | Per-request timeout |
+| `--proxy` | `-p` | *(empty)* | Proxy URL, e.g. `http://host:port`, `socks5://host:port` |
+| `--fail-body` | | *(none)* | Failure if body contains substring (repeatable) |
+| `--fail-status` | | *(none)* | Failure if status equals value (repeatable) |
+
+Run `./ShrtProbe --help` for the full help text.
+
+## Output example
 
 ```
-Using default charset: abcdefghijklmnopqrstuvwxyz0123456789
-Proxy set successfully: 
+Using default charset: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 
-Target URL:     https://t.zsxq.com/
+Target URL:     https://example.com/
 Mode:           random
-Charset:        abcdefghijklmnopqrstuvwxyz0123456789
+Charset:        abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 Path Length:    5
 Request Count:  10
 Concurrency:    15
+成功判定:       HTTP 3xx 重定向
 
-[+]Request [https://example.com/abc12] succeeded, Status code: 302, Redirect to: https://xxx.example.com/target
-[-]Request [https://example.com/xyz99] failed, Status code: 404
+[+]请求[https://example.com/abc12]成功，状态码: 302，重定向到: https://target.example/page
+[-]请求[https://example.com/xyz99]失败，状态码: 404（成功条件: HTTP 3xx）
 
-Statistics:
-Successful requests: 1
-Failed requests: 9
-Total requests: 10
-Requests completed, total time: 308.169667ms
+统计结果:
+成功请求: 1
+失败请求: 9
+总请求数: 10
+Requests completed, total time: 308ms
 ```
 
+## Proxy URL formats
 
-## Supported Proxy Types
-
-- HTTP proxy: `http://host:port`
-- HTTPS proxy: `https://host:port`
-- SOCKS5 proxy: `socks5://host:port`
+- HTTP: `http://host:port`
+- HTTPS: `https://host:port`
+- SOCKS5: `socks5://host:port` or `socks5h://host:port` (remote DNS)
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE).
 
 ## Disclaimer
 
-This tool is for security testing and educational purposes only. Users should ensure compliance with relevant laws and regulations and only test target systems with explicit authorization. The author is not responsible for any misuse of this tool.
+For authorized security testing and education only. Do not use against systems you do not own or lack permission to test. Authors are not responsible for misuse.

@@ -1,122 +1,134 @@
 # ShrtProbe
-[English](README-en.md) | [中文](README-zh.md)
 
-ShrtProbe 是一个用于测试 URL 短链接服务健壮性和安全性的工具。它能够生成随机或枚举的短链接路径，并通过并发 HTTP 请求对目标服务进行探测。
+[English](README.md) | 中文
+
+ShrtProbe 用于对 URL 短链接服务做探测：随机或按字典序枚举短路径，并发起并发 HTTP 请求。核心逻辑在 [`internal/probe`](internal/probe)，命令行入口在 [`cmd`](cmd)。
 
 ## 功能特性
 
-- 生成随机或枚举的短链接路径
-- 支持 HTTP/HTTPS/SOCKS5 代理
-- 可自定义字符集、路径长度、并发数等参数
-- 并发请求测试服务性能
-- 伪装成正常浏览器请求
-- 支持自定义请求头
+- **模式**：`random`（随机路径）、`enumerate`（按字符集顺序枚举全部路径组合）
+- **代理**：HTTP、HTTPS、`socks5`、`socks5h`
+- **并发与超时**：工作池、连接复用、单次请求超时（`--timeout`）
+- **成功判定**（见下文）：默认「**HTTP 3xx**」；可改为「**失败特征**」——你定义「什么叫失败」，**未命中任一失败特征即成功**
+- **中断**：`Ctrl+C` 通过 `context` 取消，便于停止
+- 内置类浏览器请求头（当前版本**无** `--header` 类自定义头参数）
 
 ## 安装
 
 ### 从源码编译
 
 ```bash
-git clone https://github.com/yourusername/ShrtProbe.git
+git clone https://github.com/Gi1gamesh666/ShrtProbe.git
 cd ShrtProbe
-go build -o ShrtProbe
+go build -o ShrtProbe .
 ```
 
+### 预编译二进制
 
-### 直接下载
-
-从 [Releases](https://github.com/yourusername/ShrtProbe/releases) 页面下载预编译的二进制文件。
+若仓库提供 [Releases](https://github.com/Gi1gamesh666/ShrtProbe/releases)，可从中下载。
 
 ## 使用方法
 
-### 基本用法
+### 基本示例
 
 ```bash
-# 使用默认设置测试目标 URL
 ./ShrtProbe --url http://example.com/
 
-# 使用自定义字符集和路径长度
 ./ShrtProbe --url http://example.com/ --charset abc123 --length 6
 
-# 设置并发数和请求总数
 ./ShrtProbe --url http://example.com/ --concurrency 20 --count 1000
 
-# 使用代理服务器
 ./ShrtProbe --url http://example.com/ --proxy http://proxy.example.com:8080
 ```
 
-
 ### 模式说明
 
-ShrtProbe 支持两种探测模式：
-
-1. **random（随机模式）**：随机生成指定长度的路径进行探测
-2. **enumerate（枚举模式）**：按顺序枚举所有可能的路径组合进行探测
+| 模式 | 说明 |
+|------|------|
+| `random`（默认） | 共发起 `--count` 次请求，每次路径为 `--length` 长度的随机串 |
+| `enumerate` | 按序枚举所有 `len(charset)^length` 条路径 |
 
 ```bash
-# 使用随机模式（默认）
 ./ShrtProbe --url http://example.com/ --mode random
-
-# 使用枚举模式
 ./ShrtProbe --url http://example.com/ --mode enumerate
 ```
 
+### 成功判定
 
-### 自定义请求头
+**未配置失败特征时**  
+与常见短链行为一致：**HTTP 状态码为 3xx** 视为一次成功探测。
+
+**配置了 `--fail-body` 和/或 `--fail-status` 时**  
+由你定义「失败特征」；**成功 = 请求无错误，且未命中任一失败特征**（不再强制要求 3xx）：
+
+- **`--fail-body`**（可重复）：响应正文（前 512 KiB，**不区分大小写**）包含该子串则判失败。
+- **`--fail-status`**（可重复）：HTTP 状态码等于该值则判失败。
+
+判定顺序：先匹配状态码列表，再匹配正文子串。若**只**配置了 `--fail-status`，则**不读取**正文，节省流量。
 
 ```bash
-# 添加自定义请求头
-./ShrtProbe --url http://example.com/ --header "Referer: https://example.com/" --header "Cookie: sessionid=abc123"
+./ShrtProbe --url http://example.com/ \
+  --fail-body "not found" --fail-body "页面不存在" \
+  --fail-status 404 --fail-status 410
 ```
 
+### 子命令
+
+```bash
+./ShrtProbe version
+./ShrtProbe completion bash   # 亦支持 zsh、fish、powershell
+```
 
 ## 命令行参数
 
 | 参数 | 简写 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--url` | `-u` | 无（必需） | 目标 URL |
-| `--charset` | `-s` | `abcdefghijklmnopqrstuvwxyz0123456789` | 字符集 |
-| `--mode` | `-m` | `random` | 模式：`random` 或 `enumerate` |
+| `--url` | `-u` | 无（必填） | 短链服务基础 URL |
+| `--charset` | `-s` | `a-zA-Z0-9` | 路径字符集 |
+| `--mode` | `-m` | `random` | `random` 或 `enumerate` |
 | `--length` | `-l` | `5` | 路径长度 |
-| `--count` | `-c` | `100` | 总请求数 |
-| `--concurrency` | `-n` | `10` | 并发数 |
-| `--proxy` | `-p` | 无 | 代理服务器地址 |
-| `--header` | `-H` | 无 | 自定义请求头 |
+| `--count` | `-c` | `10` | 请求总数（仅 **random**） |
+| `--concurrency` | `-n` | `15` | 并发 worker 数 |
+| `--timeout` | `-t` | `10s` | 单次请求超时 |
+| `--proxy` | `-p` | 无 | 代理，如 `http://host:port`、`socks5://host:port` |
+| `--fail-body` | | 无 | 正文包含子串则失败（可重复） |
+| `--fail-status` | | 无 | 状态码等于该值则失败（可重复） |
+
+完整说明请执行：`./ShrtProbe --help`。
 
 ## 输出示例
 
 ```
-Using default charset: abcdefghijklmnopqrstuvwxyz0123456789
-Proxy set successfully: 
+Using default charset: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 
 Target URL:     https://example.com/
 Mode:           random
-Charset:        abcdefghijklmnopqrstuvwxyz0123456789
+Charset:        abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 Path Length:    5
 Request Count:  10
 Concurrency:    15
+成功判定:       HTTP 3xx 重定向
 
-[+]请求[https://example.com/abc12]成功，状态码: 302，重定向到: https://xxx.example.com/target
-[-]请求[https://example.com/xyz99]失败，状态码: 404
+[+]请求[https://example.com/abc12]成功，状态码: 302，重定向到: https://target.example/page
+[-]请求[https://example.com/xyz99]失败，状态码: 404（成功条件: HTTP 3xx）
 
 统计结果:
 成功请求: 1
 失败请求: 9
 总请求数: 10
-Requests completed, total time: 308.169667ms
+Requests completed, total time: 308ms
 ```
 
+## 支持的代理格式
 
-## 支持的代理类型
-
-- HTTP 代理：`http://host:port`
-- HTTPS 代理：`https://host:port`
-- SOCKS5 代理：`socks5://host:port`
+- HTTP：`http://host:port`
+- HTTPS：`https://host:port`
+- SOCKS5：`socks5://host:port` 或 `socks5h://host:port`（远端解析）
 
 ## 许可证
 
-本项目采用 MIT 许可证。详情请见 [LICENSE](LICENSE) 文件。
+见 [LICENSE](LICENSE)。
 
 ## 免责声明
 
-本工具仅供安全测试和教育目的使用。使用者应确保遵守相关法律法规，并仅在获得明确授权的情况下对目标系统进行测试。作者不对任何滥用本工具的行为负责。
+本工具仅供在**授权范围内**的安全测试与学习使用。请勿对未获授权的系统使用。作者不对滥用行为负责。
